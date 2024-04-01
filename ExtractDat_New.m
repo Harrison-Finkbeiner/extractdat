@@ -40,10 +40,10 @@ timestamp = result(41,1); % seconds since epoch
 scanIndexSize = result(40,1); % words
 
 %{ Scan Index %}
-header = "Scan,Time,ACF,Mass01p,Mass01a,,Mass02p,Mass02a,,Mass03p,Mass03a,,Mass04p,Mass04a,,Mass05p,Mass05a,,Mass06p,Mass06a,,Mass07p,Mass07a";
+header = ["Scan,Time,ACF,Mass01p,Mass01a,,Mass02p,Mass02a,,Mass03p,Mass03a,,Mass04p,Mass04a,,Mass05p,Mass05a,,Mass06p,Mass06a,,Mass07p,Mass07a"];
 % Create a string for headers and seperate by name
 % Create an array of strings for each line of data
-fseek(fileID,scanIndexOffset+4,'bof'); % Might need to add 4 to skip the unsed first 4 bytes
+%fseek(fileID,scanIndexOffset+4,'bof'); % Might need to add 4 to skip the unsed first 4 bytes
 %{ Use as example to build strings 
 % testData = "1,1699207891,4616,2247,0,,226,32,,197,0,,26,0,,201,0,,403,0,,40,0";
 % [header;testData]
@@ -67,6 +67,7 @@ fseek(fileID,scanIndexOffset+4,'bof'); % Might need to add 4 to skip the unsed f
 
 %TODO REMOVE
 % Loops over all the scans 
+%{
 firstScan = fread(fileID, 1,'uint32');  % Add 4 to current scanIndexOffset after each loop
 fseek(fileID,firstScan,'bof');
 scanHeader = fread(fileID, 47,'uint32');  % Add 4 to current scanIndexOffset after each loop
@@ -82,16 +83,17 @@ thirdScan = fread(fileID, 1,'uint32');  % Add 4 to current scanIndexOffset after
 fseek(fileID,thirdScan,'bof');
 scanthreeHeader = fread(fileID, 47,'uint32');  % Add 4 to current scanIndexOffset after each loop
 
-
+%}
 curScanOffset = scanIndexOffset + 4;
-
+output = {}; % alloc memory for array
+output{end+1} = header;
 for ScanIndex = 1:scanIndexSize
     % Get to correct offset for each scan.
     fseek(fileID,curScanOffset,'bof');
     curScan = fread(fileID,1,'uint32');
     fseek(fileID,curScan,'bof');
     curScanHeader = fread(fileID,47,'uint32');
-
+    fprintf("Current Scan Index is %d\n", ScanIndex);
     % Read information from scan header
     scanNumber = curScanHeader(10,1); % bytes
     time = curScanHeader(22,1);
@@ -99,6 +101,7 @@ for ScanIndex = 1:scanIndexSize
     FCF = curScanHeader(36,1);
 
     % Loop over the masses for the current scan. Check tag of each 4 byte
+    curRow = scanNumber + "," + time + "," + ACF;
     while 1
         curMass = fread(fileID,1,'uint32');
         tag = bitsra(bitand(curMass,0xF0000000),28);
@@ -113,20 +116,27 @@ for ScanIndex = 1:scanIndexSize
             value = bitand(value,0x0000FFFF);
             
             value = bitshift(value,exp);
-            if flag == ANALOG_DATA
+            if datatype == ANALOG_DATA
                 %value = ACF * value;
-                disp(value);
-                disp(value);
-            elseif flag == PULSE_DATA
-                   disp(value);
-            elseif flag == FARADAY_DATA
+             %   fprintf("Analog");
+              %  disp(value);
+                curRow = curRow + "," + value + ",";
+            elseif datatype == PULSE_DATA
+                %    fprintf("Pulse");
+                 %  disp(value);
+                 curRow = curRow + "," + value ;
+            elseif datatype == FARADAY_DATA
                 %value = FCF * value;
                 disp
             end
+            %curRow = curRow + ",";
 
         end
 
     end
+    disp(curRow);
+    newRow = strip(curRow,'right',',');
+    output{end+1} = newRow;
     % Analog = ACF * DATA * 2^Exponent
     % Faraday = FCF * DATA * 2^Exponent
     % Pulse = DATA * 2^Exponent
@@ -135,14 +145,9 @@ for ScanIndex = 1:scanIndexSize
     %fprintf("Reading scanIndex %d\n",scanIndex);
 
 end
+output = reshape(output,[],1);
+name = name + ".csv";
+writecell(output,name,"QuoteStrings","none");
 
-
-%{ Scan header }%
 
 fclose all;
-
-
-function saveOutput 
-    %writematrix()
-    % Use name variable with .csv extension
-end
