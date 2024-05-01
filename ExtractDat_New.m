@@ -1,10 +1,12 @@
-% Notes:
-% Use swapByte function to swap byte order if needed
+%{
+Author: Harrison Finkbeiner
+Python Code authors: Dr. Philip Wenig, John H. Hartman
+Date: 04-18-2024
+Purpose: Decode Thermo Element ICP Mass Spectrometer dat files.
+Saves data into csv file with the same name as the dat file.
+%}
 
-% untSMPABC001.dat
-
-
-% Constants
+% Constants in Hexadecimal
 TAG_DATA = 0x1; % Intensity Data
 TAG_MASS = 0x2; % Magnet Mass
 TAG_TIME = 0x3; % Channel time
@@ -13,87 +15,49 @@ TAG_EOM = 0x8; % End of Mass
 TAG_B = 0xB; % ??
 TAG_BSCAN = 0xC; % B scan
 TAG_EOS = 0xF; % End of scan
-
 ANALOG_DATA = 0x0; % Analog data type
 PULSE_DATA = 0x1; % Pulse data type
 FARADAY_DATA = 0x8; % Faraday data type
 
-
+% Opens dat file and reads the headers
 [file,path] = uigetfile('*.dat');
-[path,name,ext] = fileparts(file); % Gets name of dat file without extension
-fileName = fullfile(path,file);
+fileName = fullfile(path,file); % Location of a dat file
+[~,name,ext] = fileparts(file); % Gets name of dat file without extension
 fileID = fopen(fileName,'r');
 fseek(fileID,16,'bof');
-% Have to skip first 4 bytes to match with how python code works and then
-% only need 85 words
-result = fread(fileID, 85,'uint32');  
-test = dec2bin(result);
-test2 = dec2hex(result);
-%{ File Header %}
-% Use the result(row,col) to set the variables to be used later
-Index_Len = dec2hex(result(40,1),8); % Just for testing
-TIMESTAMP = dec2hex(result(41,1),8); % Just for testing
-OFFSET = dec2hex(result(34,1),8); % Just for testing
 
+
+%{ File Header %}
+result = fread(fileID, 85,'uint32');  % Read first 85 bytes
 scanIndexOffset = result(34,1); % bytes
 timestamp = result(41,1); % seconds since epoch
 scanIndexSize = result(40,1); % words
+header = ["Scan,Time,ACF,Mass01p,Mass01a,,Mass02p,Mass02a,,Mass03p,Mass03a,,Mass04p,Mass04a,,Mass05p,Mass05a,,Mass06p,Mass06a,,Mass07p,Mass07a"];
 
 %{ Scan Index %}
-header = ["Scan,Time,ACF,Mass01p,Mass01a,,Mass02p,Mass02a,,Mass03p,Mass03a,,Mass04p,Mass04a,,Mass05p,Mass05a,,Mass06p,Mass06a,,Mass07p,Mass07a"];
-% Create a string for headers and seperate by name
-% Create an array of strings for each line of data
-%fseek(fileID,scanIndexOffset+4,'bof'); % Might need to add 4 to skip the unsed first 4 bytes
-%{ Use as example to build strings 
-% testData = "1,1699207891,4616,2247,0,,226,32,,197,0,,26,0,,201,0,,403,0,,40,0";
-% [header;testData]
-%}
 
-% Scan index is at 10 in the variable. 
-% Time Delta from previous scan is at 8 
+% Index values for header 
+% Time Delta from previous scan = 8 
 % Scan index = 10
 % ACF * 64  = 13
 % Time Delta of Previous scan from start of experiment (ms) = 19? 
 % Time Delta of Current scan from start of experiment (ms) = 20? 
+% Time = 22
 % EDAC / 1000 = 32
 % FCF * 256 = 36
 
-
-% Verified data from example scans
-% Scan = 10
-% Time = 22
-% ACF = 13
-% FCF = 36 ??
-
-%TODO REMOVE
-% Loops over all the scans 
-%{
-firstScan = fread(fileID, 1,'uint32');  % Add 4 to current scanIndexOffset after each loop
-fseek(fileID,firstScan,'bof');
-scanHeader = fread(fileID, 47,'uint32');  % Add 4 to current scanIndexOffset after each loop
-disp(header);
-
-fseek(fileID,scanIndexOffset+8,'bof'); % Might need to add 4 to skip the unsed first 4 bytes
-secondScan = fread(fileID, 1,'uint32');  % Add 4 to current scanIndexOffset after each loop
-fseek(fileID,secondScan,'bof');
-scantwoHeader = fread(fileID, 47,'uint32');  % Add 4 to current scanIndexOffset after each loop
-
-fseek(fileID,scanIndexOffset+12,'bof'); % Might need to add 4 to skip the unsed first 4 bytes
-thirdScan = fread(fileID, 1,'uint32');  % Add 4 to current scanIndexOffset after each loop
-fseek(fileID,thirdScan,'bof');
-scanthreeHeader = fread(fileID, 47,'uint32');  % Add 4 to current scanIndexOffset after each loop
-
-%}
 curScanOffset = scanIndexOffset + 4;
-output = {}; % alloc memory for array
-output{end+1} = header;
+output = cell(1,scanIndexSize);
+
+output{1} = header;
 for ScanIndex = 1:scanIndexSize
+
     % Get to correct offset for each scan.
     fseek(fileID,curScanOffset,'bof');
     curScan = fread(fileID,1,'uint32');
     fseek(fileID,curScan,'bof');
     curScanHeader = fread(fileID,47,'uint32');
-    fprintf("Current Scan Index is %d\n", ScanIndex);
+    
     % Read information from scan header
     scanNumber = curScanHeader(10,1); % bytes
     time = curScanHeader(22,1);
@@ -104,50 +68,45 @@ for ScanIndex = 1:scanIndexSize
     curRow = scanNumber + "," + time + "," + ACF;
     while 1
         curMass = fread(fileID,1,'uint32');
-        tag = bitsra(bitand(curMass,0xF0000000),28);
+        tag = bitshift(bitand(curMass,0xF0000000),-28);
         value = bitand(curMass,0x0FFFFFFF);
+
         if tag == TAG_EOS
             curScanOffset = curScanOffset + 4;
             break
         elseif tag == TAG_DATA
-            flag = bitsra(bitand(value,0x0F000000),24);
-            datatype = bitsra(bitand(value,0x00F00000),20);
-            exp = bitsra(bitand(value,0x000F0000),16);
+            flag = bitshift(bitand(value,0x0F000000),-24);
+            datatype = bitshift(bitand(value,0x00F00000),-20);
+            exp = bitshift(bitand(value,0x000F0000),-16);
             value = bitand(value,0x0000FFFF);
-            
             value = bitshift(value,exp);
+
             if datatype == ANALOG_DATA
                 %value = ACF * value;
-             %   fprintf("Analog");
-              %  disp(value);
                 curRow = curRow + "," + value + ",";
             elseif datatype == PULSE_DATA
-                %    fprintf("Pulse");
-                 %  disp(value);
                  curRow = curRow + "," + value ;
             elseif datatype == FARADAY_DATA
                 %value = FCF * value;
-                disp
             end
-            %curRow = curRow + ",";
 
         end
 
     end
-    disp(curRow);
+    
     newRow = strip(curRow,'right',',');
-    output{end+1} = newRow;
+    output{ScanIndex+1} = newRow;
+
+    % Calculations if needed. 
     % Analog = ACF * DATA * 2^Exponent
     % Faraday = FCF * DATA * 2^Exponent
     % Pulse = DATA * 2^Exponent
 
 
-    %fprintf("Reading scanIndex %d\n",scanIndex);
-
 end
 output = reshape(output,[],1);
-name = name + ".csv";
-writecell(output,name,"QuoteStrings","none");
-
+name = name + "combined ML.csv";
+writecell(output,path+name,"QuoteStrings","none");
+disp("Finished writing csv file"); 
 
 fclose all;
